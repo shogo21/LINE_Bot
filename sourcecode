@@ -1,0 +1,679 @@
+//日付、時刻のフォーマット設定
+var dateExp = /(\d{2})\/(\d{2})\s(\d{2}):(\d{2})/;
+var dayExp = /(\d+)[\/月](\d+)/;
+var hourMinExp = /(\d+)[:時](\d+)*/;
+//var dateExp2 = /\d+-(\d+)-(\d+)/;
+
+//番号のフォーマット設定
+var numExp = /(\d+)/;
+
+
+/*function doPost(e) {
+  try {
+    handleMessage(e);
+  } catch(error) {
+    logging("ToCalendarFromLineBot");
+    logging(JSON.stringify(e));
+    logging(JSON.stringify(error));
+    var event = JSON.parse(e.postData.contents).events[0]
+    var replyToken = event.replyToken;
+    var eventtype = event.type;
+    if (typeof replyToken === 'undefined') {
+      return;
+    } 
+    var messageText = "";
+    if (eventtype == "postback") {
+      messageText = event.postback.params.date;
+    } else {
+      messageText = event.message.text;
+    }
+    reply(replyToken, messageText);
+    //reply(replyToken, error.message);
+  }
+}*/
+
+//スプレッドシートの読み取り
+function logging(str) {
+  var sheet = SpreadsheetApp.openById(ERROR_SHEET_ID).getActiveSheet();
+  var ts = new Date().toLocaleString({timeZone: "Asia/Osaka"});
+  sheet.appendRow([ts, str]);
+}
+
+function doPost(e) {
+  var event = JSON.parse(e.postData.contents).events[0]
+  var replyToken = event.replyToken;
+  var lineType = event.type
+  if (typeof replyToken === "undefined" || lineType === "follow") {
+    return;
+  }
+  var userMessage = JSON.parse(e.postData.contents).events[0].message.text;
+  var cache = CacheService.getScriptCache();
+  var type = cache.get("type");
+  var year = new Date().getFullYear();
+
+  /*var messageText = "";
+  if (lineType == "postback") {
+    messageText = event.postback.params.date;
+  } else {
+    messageText = event.message.text;
+  }*/
+  //cache.put("messageText", messageText);
+
+  if (type === null) {
+    if (userMessage === "予定追加") {
+      cache.put("type", 1);
+      //pushDatePicker("あ");
+      reply(replyToken, "予定の開始日を教えてください！\n「06/17, 6月17日」などの形式なら大丈夫です！");
+    } else if (userMessage === "一週間の予定確認") {
+      reply(replyToken, getEventss());
+    } else if (userMessage == "予定削除") {
+      cache.put("type", 'delete_1');
+      reply(replyToken, "削除したい予定の日にちを教えてください！");
+    } else if (userMessage == "予定変更") {
+      cache.put("type", 'change_1');
+      reply(replyToken, "変更したい予定の日にちを教えてください！");
+    } else {
+      reply(replyToken, "リッチメニューから予定追加、一週間の予定確認などができるので気軽に話しかけてくださいね！");
+    }
+  } else {
+    if (userMessage === "キャンセル") {
+      cache.remove("type");
+      reply(replyToken, "キャンセルしました！");
+      return;
+    }
+
+    switch(type) {
+      case "1":
+        // 予定の開始日
+        if (userMessage.match(dayExp) == null) { //例外処理
+          cache.put("type", 1);
+          reply(replyToken, "形式を確認し、もう一度入力してください！");
+        }
+        /*var messageText = "";
+        if (lineType == "postback") {
+          messageText = event.postback.params.date;
+        }else {
+          messageText = event.message.text;
+        }*/
+        var [matched, startmonth, startday] = userMessage.match(dayExp); //dayexpの型に合う文字列を取り出す。
+        cache.put("type", 2);
+        cache.put("start_month", startmonth);
+        cache.put("start_day", startday);
+        reply(replyToken, startmonth + "/" + startday + "ですね！\n次に開始時刻を教えてください。「13:00, 13時, 13:20, 13時20分」などの形式なら大丈夫です！");
+        break;
+
+      case "2":
+        // 開始時刻
+        if (userMessage.match(hourMinExp) == null) { //例外処理
+          cache.put("type", 2);
+          reply(replyToken, "形式を確認し、もう一度入力してください！");
+        }
+        var [matched, startHour, startMin] = userMessage.match(hourMinExp);
+        cache.put("type", 3);
+        cache.put("start_hour", startHour);
+        if (startMin == null) startMin = "00";
+        cache.put("start_min", startMin);
+        reply(replyToken, startHour + ":" + startMin + "ですね！\n次に予定の終了日を教えてください。");
+        break;
+
+      case "3":
+        // 予定の終了日
+        if (userMessage.match(dayExp) == null) { //例外処理
+          cache.put("type", 3);
+          reply(replyToken, "形式を確認し、もう一度入力してください！");
+        }
+        var [matched, endmonth, endday] = userMessage.match(dayExp); //dayexpの型に合う文字列を取り出す。
+        cache.put("type", 4);
+        cache.put("end_month", endmonth);
+        cache.put("end_day", endday);
+        reply(replyToken, endmonth + "/" + endday + "ですね！\n次に終了時刻を教えてください。「13:00, 13時, 13:20, 13時20分」などの形式なら大丈夫です！");
+        break;
+      
+      case "4":
+        // 終了時刻
+        if (userMessage.match(hourMinExp) == null) { //例外処理
+          cache.put("type", 4);
+          reply(replyToken, "形式を確認し、もう一度入力してください！");
+        }
+        var [matched, endHour, endMin] = userMessage.match(hourMinExp);
+        cache.put("type", 5);
+        cache.put("end_hour", endHour);
+        if (endMin == null) endMin = "00";
+        cache.put("end_min", endMin);
+        reply(replyToken, endHour + ":" + endMin + "ですね！\n最後に予定名を教えてください！");
+        break;
+
+      case "5":
+        // 予定名
+        cache.put("type", 6);
+        cache.put("title", userMessage);
+        var [title, startDate, endDate] = createEventData(cache);
+        pushmessage_confirm_template("以下の予定を追加しますか？\n"+toEventFormat(title, startDate, endDate));
+        break;
+
+      case "6":
+        // 確認の回答がはい or いいえ
+        cache.remove("type");
+        if (userMessage === "はい") {
+          var [title, startDate, endDate] = createEventData(cache);
+          CalendarApp.getDefaultCalendar().createEvent(title, startDate, endDate);
+          reply(replyToken, "追加しました！\nお疲れ様でした！");
+        } else {
+          reply(replyToken, "追加を中止しました。");
+        }
+        break;
+      case "delete_1":
+        //削除する日にちを決定する
+        if (userMessage.match(dayExp) == null) { //例外処理
+          cache.put("type", "delete_1");
+          reply(replyToken, "形式を確認し、もう一度入力してください！");
+        }
+        var [matched, delmonth, delday] = userMessage.match(dayExp); //dayexpの型に合う文字列を取り出す。
+        var delete_d = new Date(year, delmonth-1, delday);
+        cache.put("datedelete", delete_d); //削除する日にちをputする 
+        var tmpBody ='';
+        //arrCalsはイベントを記憶する配列
+        var arrCals = get_Calendar();
+        var events = CalendarApp.getDefaultCalendar().getEventsForDay(delete_d); //削除する日の全ての予定を記憶する
+        for (var i = 0 ; i < arrCals.length ; i++){
+          tmpBody += getEventsEdit(arrCals[i],delete_d); //ある１日の予定を記憶する
+        }
+        if (events.length == 1) { //指定した日に一つの予定しかないとき
+            cache.put("type", 'delete_3');
+            cache.put("number", 1); //予定が一つしかないから一番目の予定を削除する
+            var event = CalendarApp.getDefaultCalendar().getEventById(getEventID(delete_d, cache.get("number")));
+            pushmessage_confirm_template("以下の予定を削除しましか？\n"+toEventFormat(event.getTitle(), event.getStartTime(), event.getEndTime()));
+        }else if (events.length >= 2) {　//指定した日に複数の予定がある時
+          cache.put("type", 'delete_2');
+          reply(replyToken, "何番目の予定を削除しましか？（数字のみを入力してください！）\n"+tmpBody);
+        }else{ //指定した日に予定がない時
+          cache.remove("type");
+          reply(replyToken, "指定した日にちに予定はありません。");
+        }
+        break;
+      case "delete_2":　
+        //何番目の予定を削除するか決定する
+        if (isNaN(userMessage)) { //入力文字が数字かを判定する、数字ではない時の処理
+          cache.put("type", "delete_2");
+          reply(replyToken, "予定数以下の数字をもう一度入力してください！");
+        }
+        var [matched, num] = userMessage.match(numExp); //numexpの型に合う数字
+        var delete_d = new Date(cache.get("datedelete"));
+        var events = CalendarApp.getDefaultCalendar().getEventsForDay(delete_d); //削除する日の全ての予定を記憶する
+        if(events.length < num) { //入力された数字が予定数を超えている場合
+          cache.put("type", "delete_2");
+          reply(replyToken, "入力された数が予定数を超えています。\nもう一度入力してください！");
+        } else {
+          cache.put("number", num);
+          cache.put("type", 'delete_3');
+          var event = CalendarApp.getDefaultCalendar().getEventById(getEventID(delete_d, cache.get("number")));
+          pushmessage_confirm_template("以下の予定を削除しますか？\n"+toEventFormat(event.getTitle(), event.getStartTime(), event.getEndTime()));
+        }
+        break;
+      case "delete_3":
+        //指定した予定を削除する
+        cache.remove("type");
+        var delete_d = new Date(cache.get("datedelete"));
+        var event = CalendarApp.getDefaultCalendar().getEventById(getEventID(delete_d, cache.get("number")));
+        if(userMessage == "はい") {
+          event.deleteEvent();
+          reply(replyToken, "予定を削除しました！");
+        }else {
+          reply(replyToken, "削除を中止しました。");
+        }
+        break;
+      case "change_1":
+        //変更する日にちを決定する
+        if (userMessage.match(dayExp) == null) { //例外処理
+          cache.put("type", "change_1");
+          reply(replyToken, "形式を確認し、もう一度入力してください！");
+        }
+        var [matched, chmonth, chday] = userMessage.match(dayExp); //dayexpの型に合う文字列を取り出す。
+        var date_change = new Date(year, chmonth-1, chday);
+        cache.put("datechange", date_change);
+        var tmpBody ='';
+        //arrCalsはイベントを記憶する配列
+        var arrCals = get_Calendar();
+        var events = CalendarApp.getDefaultCalendar().getEventsForDay(date_change); //変更する日の全ての予定を記憶する
+        for (var i = 0 ; i < arrCals.length ; i++){
+          tmpBody += getEventsEdit(arrCals[i],date_change); //ある１日の予定を記憶する
+        }
+        cache.put("datech", date_change); //変更する日にちをputする
+        if (events.length == 1) { //指定した日に一つの予定しかないとき
+          cache.put("type", 'change_3');
+          cache.put("number", 1); //予定が一つしかないから一番目の予定を変更する
+          var event = events[0];
+          reply(replyToken, "以下の予定の何を変更しますか？\n"+toEventFormat(event.getTitle(), event.getStartTime(), event.getEndTime())+"\n1 : 開始時間\n2 : 終了時間\n3 : 予定名");
+        }else if (events.length >= 2) {　//指定した日に複数の予定がある時
+          cache.put("type", 'change_2');
+          reply(replyToken, "何番目の予定を変更しますか？（数字のみを入力してください！）\n"+tmpBody);
+        }else{ //指定した日に予定がない時
+          cache.remove("type");
+          reply(replyToken, "指定した日にちに予定はありません。");
+        }
+        break;
+      case "change_2":　
+        //何番目の予定を変更するか決定する
+        if (isNaN(userMessage)) { //入力文字が数字かを判定する、数字ではない時の処理
+          cache.put("type", "change_2");
+          reply(replyToken, "予定数以下の数字をもう一度入力してください！");
+        }
+        var [matched, ch_num1] = userMessage.match(numExp); //numexpの型に合う数字
+        var change_d = new Date(cache.get("datechange"));
+        var events = CalendarApp.getDefaultCalendar().getEventsForDay(change_d); //削除する日の全ての予定を記憶する
+        if(events.length < ch_num1) { //入力された数字が予定数を超えている場合
+          cache.put("type", "change_2");
+          reply(replyToken, "入力された数が予定数を超えています。\nもう一度入力してください！");
+        } else {
+          cache.put("number", ch_num1);
+          cache.put("type", 'change_3');
+          var event = events[ch_num1-1];
+          reply(replyToken, "以下の予定の何を変更しますか？\n"+toEventFormat(event.getTitle(), event.getStartTime(), event.getEndTime())+"\n\n1 : 開始時間\n2 : 終了時間\n3 : 予定名");
+        }
+        break;
+      case "change_3":
+        //指定した予定を変更する
+        if (isNaN(userMessage)) { //入力文字が数字かを判定する、数字ではない時の処理
+          cache.put("type", "change_3");
+          reply(replyToken, "1, 2, 3のどれかをもう一度入力してください！");
+        }
+        var [matched, ch_num2] = userMessage.match(numExp); //numexpの型に合う数字
+        var change_d = new Date(cache.get("datechange"));
+        var event = CalendarApp.getDefaultCalendar().getEventById(getEventID(change_d, cache.get("number")));
+        if (ch_num2 == 1) {
+          cache.put("type", "change_4");
+          reply(replyToken, "変更後の開始時間を入力してください！\n「13:00, 13時, 13:20, 13時20分」などの形式なら大丈夫です！")
+        }else if (ch_num2 == 2) {
+          cache.put("type", "change_5");
+          reply(replyToken, "変更後の終了時間を入力してください！\n「13:00, 13時, 13:20, 13時20分」などの形式なら大丈夫です！")
+        }else if (ch_num2 == 3) {
+          cache.put("type", "change_6");
+          reply(replyToken, "変更後の予定名を入力してください！");
+        }else {
+          cache.put("type", "change_3");
+          reply(replyToken, "1, 2, 3のどれかを入力してください！");
+        }
+        break;
+      case "change_4":
+        if (userMessage.match(hourMinExp) == null) { //例外処理
+          cache.put("type", "change_4");
+          reply(replyToken, "形式を確認し、もう一度入力してください！");
+        }
+        //変更後の開始時刻を入力
+        var [matched, ch_startHour, ch_startMin] = userMessage.match(hourMinExp);
+        if (ch_startMin == null) {
+          ch_startMin = "00";
+        }
+        cache.put("type", "change_7");
+        cache.put("chStartHour", ch_startHour);
+        cache.put("chStartMin", ch_startMin);       
+        var change_d = new Date(cache.get("datechange"));
+        change_d.setHours(ch_startHour);
+        change_d.setMinutes(ch_startMin);
+        var event = CalendarApp.getDefaultCalendar().getEventById(getEventID(change_d, cache.get("number")));
+        pushmessage_confirm_template("以下の変更でよろしいですか？\n"+toEventFormat(event.getTitle(), change_d, event.getEndTime()));
+        break;
+      case "change_5":
+        if (userMessage.match(hourMinExp) == null) { //例外処理
+          cache.put("type", "change_5");
+          reply(replyToken, "形式を確認し、もう一度入力してください！");
+        }
+        //変更後の終了時刻を入力
+        var [matched, ch_endHour, ch_endMin] = userMessage.match(hourMinExp);
+        if (ch_endMin == null) {
+          ch_endMin = "00";
+        }
+        cache.put("type", "change_8");
+        cache.put("chEndHour", ch_endHour);
+        cache.put("chEndMin", ch_endMin);       
+        var change_d = new Date(cache.get("datechange"));
+        change_d.setHours(ch_endHour);
+        change_d.setMinutes(ch_endMin);
+        var event = CalendarApp.getDefaultCalendar().getEventById(getEventID(change_d, cache.get("number")));
+        pushmessage_confirm_template("以下の変更でよろしいですか？\n"+toEventFormat(event.getTitle(), event.getStartTime(), change_d));
+        break;
+      case "change_6":
+      //タイトルの変更を入力
+        cache.put("type", "change_9");
+        cache.put("title", userMessage);
+        var change_d = new Date(cache.get("datechange"));
+        var event = CalendarApp.getDefaultCalendar().getEventById(getEventID(change_d, cache.get("number")));
+        pushmessage_confirm_template("以下の変更でよろしいですか？\n"+toEventFormat(cache.get("title"), event.getStartTime(), event.getEndTime()));
+        break;
+      case "change_7":
+      //変更後の開始時間の決定
+      cache.remove("type");
+        var change_d = new Date(cache.get("datechange"));
+        var event = CalendarApp.getDefaultCalendar().getEventById(getEventID(change_d, cache.get("number")));
+        if(userMessage == "はい") {
+          change_d.setHours(cache.get("chStartHour"));
+          change_d.setMinutes(cache.get("chStartMin"));
+          event.setTime(change_d, event.getEndTime());
+          reply(replyToken, "予定を変更しました！");
+        }else {
+          reply(replyToken, "変更を中止しました。");
+        }
+        break;
+      case "change_8":
+      //変更後の終了時間の決定
+        cache.remove("type");
+        var change_d = new Date(cache.get("datechange"));
+        var event = CalendarApp.getDefaultCalendar().getEventById(getEventID(change_d, cache.get("number")));
+        if(userMessage == "はい") {
+          change_d.setHours(cache.get("chEndHour"));
+          change_d.setMinutes(cache.get("chEndMin"));
+          event.setTime(event.getStartTime(), change_d);
+          reply(replyToken, "予定を変更しました！");
+        }else {
+          reply(replyToken, "変更を中止しました。");
+        }
+        break;
+      case "change_9":
+        //タイトルの変更の決定
+        cache.remove("type");
+        if(userMessage == "はい") {
+          var change_d = new Date(cache.get("datechange"));
+          var event = CalendarApp.getDefaultCalendar().getEventById(getEventID(change_d, cache.get("number")));
+          event.setTitle(cache.get("title"));
+          reply(replyToken, "予定を変更しました！");
+        }else {
+          reply(replyToken, "変更を中止しました。");
+        }
+        break;
+      default:
+        reply(replyToken, "申し訳ありません。\n形式に誤りがないか確認してみて、なければ「キャンセル」で予定入力をキャンセルすることができるので、そちらを試していただけますか？");
+        break;
+    }
+  }
+}
+
+function createEventData(cache) {
+  var year = new Date().getFullYear();
+  var title = cache.get("title");
+  var startDate = new Date(year, cache.get("start_month") - 1, cache.get("start_day"), cache.get("start_hour"), cache.get("start_min"));
+  var endDate = new Date(year, cache.get("end_month") - 1, cache.get("end_day"), cache.get("end_hour"), cache.get("end_min"));
+  return [title, startDate, endDate];
+}
+
+function toEventFormat(title, startDate, endDate) {
+  var start = Utilities.formatDate(startDate, "JST", "MM/dd HH:mm");
+  var end = Utilities.formatDate(endDate, "JST", "MM/dd HH:mm");
+  var str = start + " ~ " + end + " : " + title;
+  return str;
+}
+
+function reply(replyToken, message) {
+  var url = "https://api.line.me/v2/bot/message/reply";
+  UrlFetchApp.fetch(url, {
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8",
+      "Authorization": "Bearer " + CHANNEL_ACCESS_TOKEN,
+    },
+    "method": "post",
+    "payload": JSON.stringify({
+      "replyToken": replyToken,
+      "messages": [{
+        "type": "text",
+        "text": message,
+      }],
+    }),
+  });
+  return ContentService.createTextOutput(JSON.stringify({"content": "post ok"})).setMimeType(ContentService.MimeType.JSON);
+}
+
+
+
+
+
+function get_Calendar() {
+  var arrCals=[];
+  //CalendarApp.getCalendarByIdで目的とするカレンダーをオブジェクトとして取得する
+  //pushで配列に配列の要素を追加する、つまり２次元配列
+  arrCals.push(CalendarApp.getCalendarById('xinjingx654@gmail.com'));
+  return arrCals;
+}
+
+//1週間の予定を取得するメインの関数
+function get_Week_Schedule(){
+  //arrCalsは一週間のイベントを記憶する配列
+  var arrCals = get_Calendar();
+  //日付を取得する
+  var date = new Date();
+  var today_date = date.getDate();
+  var strBody ='';
+  var tmpBody ='';
+  const dayArray = ['日', '月', '火', '水', '木', '金', '土']; //曜日の配列
+  for (var j = 0; j < 7 ; j++ ){
+    //getDate()で「日」を返す
+    date.setDate(today_date+j);
+    for (var i = 0 ; i < arrCals.length ; i++){
+      tmpBody += getEvents(arrCals[i],date); //ある１日の予定を記憶する
+    }
+    if (tmpBody){
+      strBody += (date.getMonth()+1)+"月"+date.getDate() + '日('+dayArray[date.getDay()]+')\n' + tmpBody; //一週間の予定を記憶する
+    }
+    tmpBody = '';
+  }
+  return (strBody);
+
+
+}
+//ある１日の予定を取得する関数
+function getEvents(Cals,getDate){
+  //var arrEvents = Cals; //これじゃダメだった
+　var arrEvents = Cals.getEventsForDay(getDate);//ある１日の全ての予定を取得
+  var strEvents ='';
+  for (var i=0; i<arrEvents.length; i++){ //１日の予定数=arrEvents.length
+    //イベントのタイトルを取得する
+    var strTitle = arrEvents[i].getTitle();
+    //イベントの開始時間を取得する
+    var strStart = _HHmm(arrEvents[i].getStartTime());
+    //イベントの終了時間を取得する
+    var strEnd = _HHmm(arrEvents[i].getEndTime());
+    strEvents += "　" + strStart + '～' + strEnd+ '：'  + strTitle + '\n';  
+  }
+  return strEvents;
+}
+
+//削除、変更する１日の予定を取得する関数
+function getEventsEdit(Cals,getDate){
+　var arrEvents = Cals.getEventsForDay(getDate);//ある１日の全ての予定を取得
+  var strEvents ='';
+  for (var i=0; i<arrEvents.length; i++){ //１日の予定数=arrEvents.length
+    //イベントのタイトルを取得する
+    var strTitle = arrEvents[i].getTitle();
+    //イベントの開始時間を取得する
+    var strStart = _HHmm(arrEvents[i].getStartTime());
+    //イベントの終了時間を取得する
+    var strEnd = _HHmm(arrEvents[i].getEndTime());
+    if (arrEvents.length == 1) {
+      strEvents += strStart + '～' + strEnd+ '：'  + strTitle + '\n';  
+    }else {
+      strEvents += (i+1) + ",　" + strStart + '～' + strEnd+ '：'  + strTitle + '\n';  
+    }
+    //cache.put("event_count", i);
+  }
+  return strEvents;
+}
+
+//予定確認時の関数
+function getEventss() {
+  var body;
+  body = get_Week_Schedule(); //一週間の予定を取得する
+  if (body == '') {
+    body = "今週の予定はありません!";
+    return body;
+  }else {
+    body = "おつかれさまです！\n一週間の予定です！\n" + body;
+    return body;
+  }
+}
+
+//予定のIDを取得するコード
+function getEventID(date, number) {
+  var calendar = CalendarApp.getDefaultCalendar();
+  var events = calendar.getEventsForDay(date);
+  var event;
+  var id;
+  event = events[number-1];
+  id = event.getId();
+  return id;
+}
+
+function getGoogleCalendar() {
+  var today = new Date();
+
+  var myCalendar = CalendarApp.getCalendarById("xinjingx654@gmail.com");
+
+  var myEvents = myCalendar.getEventsForDay(today);
+
+  var message = [];
+
+  if (myEvents.length == 0) {
+    message.push('今日の予定はありません。');
+  } else {
+    message.push("本日の予定です！\n");
+    myEvents.forEach(function (event) {
+      var eventStartTime = event.getStartTime();
+      var eventEndTime = event.getEndTime();
+      eventStartTime = Utilities.formatDate(eventStartTime, 'JST', 'HH:mm');
+      eventEndTime = Utilities.formatDate(eventEndTime, 'JST', 'HH:mm');
+      if (event.getTitle()) {
+        message.push(
+          eventStartTime + "〜" + eventEndTime + " : " + event.getTitle() + '\n'
+        );
+      }
+      if (event.getDescription()) {
+        message.push(event.getDescription() + '\n');
+      }
+    });
+  }
+
+  message = message.join('');
+
+  return postMessage(message);
+}
+
+// 毎朝Lineに通知する
+function postMessage(message) {
+  var url = 'https://api.line.me/v2/bot/message/broadcast';  // Sends a push message to a user, group, or room API
+
+  var headers = {
+    'Content-Type': 'application/json; charset=UTF-8',
+    Authorization: 'Bearer ' + CHANNEL_ACCESS_TOKEN,
+  };
+
+  var postData = {
+    to: "U80badca6fadf542c4395dc966a31be16",
+    messages: [
+      {
+        type: 'text',
+        text: message,
+      },
+    ],
+  };
+
+  var options = {
+    method: 'post',
+    headers: headers,
+    payload: JSON.stringify(postData),
+  };
+
+  return UrlFetchApp.fetch(url, options);
+}
+
+/*
+確認テンプレートメッセージ（はい/いいえ）を送る
+———————————–*/
+function pushmessage_confirm_template(word) {
+
+	/* 確認テンプレートメッセージを送る */
+	UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', {
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: 'Bearer ' + CHANNEL_ACCESS_TOKEN, // スクリプトプロパティにトークンは事前に追加しておく
+		},
+		method: 'POST',
+		payload: JSON.stringify({
+			to: "U80badca6fadf542c4395dc966a31be16", // スクリプトプロパティに送信先IDは事前に追加しておく
+			messages: [
+				{
+					"type": "template",
+					"altText": "確認テンプレートメッセージ",
+					"template": {
+						"type": "confirm",
+						"text": word,
+						"actions": [
+							{
+								"type": "message",
+								"label": "はい",
+								"text": "はい"
+							},
+							{
+								"type": "message",
+								"label": "いいえ",
+								"text": "いいえ"
+							}
+						]
+					}
+				}
+			],
+			"notificationDisabled": false // trueだとユーザーに通知されない
+		}),
+	});
+}
+
+
+function pushDatePicker(message) {
+  UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', {
+    headers: {
+      "Content-Type": "application/json; charset=UTF-8",
+      Authorization: "Bearer "+ CHANNEL_ACCESS_TOKEN,
+    },
+    method: "POST",
+    payload: JSON.stringify({
+      to: "U80badca6fadf542c4395dc966a31be16", // スクリプトプロパティに送信先IDは事前に追加しておく
+      messages: [
+        {
+          "type": "template",
+          "altText": "datetime_picker",
+          "template": {
+            "type": "buttons",
+            "thumbnailImageUrl": "https://placehold.jp/00dd82/ffffff/640x480.jpg?text=日にち選択", // 画像のURL
+            "imageAspectRatio": "rectangle", // 画像のアスペクト比、「rectangle: 1.51:1」・「square: 1:1」、デフォルト値はrectangle
+            "imageSize": "cover", // 画像の表示形式
+            "imageBackgroundColor": "#FFFFFF", // 画像の背景色
+            "title": "【日にち選択】",
+            "text": message,
+            "defaultAction": {
+              "type": "uri",
+              "label": "View detail",
+              "uri": "https://www."
+            },
+            "actions": [
+              {
+                "type": "datetimepicker",
+                "label": "ここをタップ！",
+                "data": "action=settime",
+                "mode": "date",
+                "initial": Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy-MM-dd"),
+              }
+            ]
+          }
+        }
+      ],
+      "notificationDisabled": false // trueだとユーザーに通知されない
+    }),
+  });
+
+  //return ContentService.createTextOutput(JSON.stringify({ "content": "postok"})).setMimeType(ContentService.MimeType.JSON);
+
+}
+
+function toHHmm(date){
+  return Utilities.formatDate(date, "JST", "HH:mm");
+}
+/* 時刻の表記をHH:mmに変更 */
+function _HHmm(str){
+  return Utilities.formatDate(str,'JST','HH:mm');
+}
